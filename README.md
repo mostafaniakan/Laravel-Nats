@@ -1,66 +1,129 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Laravel-Nats
+This package provides an observer for the Laravel Nats push-based event system that uses Laravel events. it uses https://github.com/basis-company/nats.php for using Nats in php
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+## Installation
+You can install the package via Composer:
 
-## About Laravel
+```bash
+composer require basis-company/nats
+```
+The package will automatically register itself.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Connection
+Here’s an explanation of each variable in your `.env` file for the NATS configuration:
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+```
+NATS_HOST=nats://localhost:4222
+NATS_USER=basis
+NATS_PASS=secret
+NATS_TLS_CERT_FILE=/path/to/cert.pem
+NATS_TLS_KEY_FILE=/path/to/key.pem
+NATS_TLS_CA_FILE=/path/to/ca-cert.pem
+```
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+other configuration parameters can be found in `config/nats.php`.
 
-## Learning Laravel
+```
+return [
+    'host' => env('NATS_HOST', 'localhost'),
+    'user' => env('NATS_USER', 'user'),
+    'pass' => env('NATS_PASS', 'password'),
+    'tls_cert_file' => env('NATS_TLS_CERT_FILE', null),
+    'tls_key_file' => env('NATS_TLS_KEY_FILE', null),
+    'tls_ca_file' => env('NATS_TLS_CA_FILE', null),
+];
+```
+### Service Registration in `AppServiceProvider.php`:
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+```php
+  public function register(): void
+    {
+        $this->app->singleton(NatsService::class, function ($app) {
+            return new NatsService();
+        });
+    }
+```
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Usage 
+ 
+### 1:In the `jobs/ProcessMessageJob.php`:
 
-## Laravel Sponsors
+The `ProcessMessageJob` class is a Laravel job that implements the `ShouldQueue` interface, which means it is queued for background processing. When a message is received from NATS (as shown in the `receiveMessage` method), the job is dispatched to handle the message’s payload asynchronously.
+```php
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Log;
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+class ProcessMessageJob implements ShouldQueue
+{
+    use Queueable;
 
-### Premium Partners
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+    protected $message;
+    public function __construct($message)
+    {
+        $this->message = $message;
+    }
 
-## Contributing
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+    public function handle(): void
+    {
+        Log::info("Message received: {$this->message}");
+    }
+}
+```
 
-## Code of Conduct
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### 2: In the `Controllers/NatsController.php`:
 
-## Security Vulnerabilities
+this code is using dependency injection to inject the `NatsService` into the `controller`.
+The NatsService class is responsible for handling `NATS` messaging tasks like publishing and subscribing to messages. 
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```php
+use App\Services\NatsService;
 
-## License
+protected $natsService;
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+    public function __construct(NatsService $natsService)
+    {
+        $this->natsService = $natsService;
+    }
+```
+
+
+The `ping` method in the `NatsController` is used to check if the application is successfully connected to the NATS server. It leverages the `NatsService` that was injected earlier to perform the actual check.
+
+```php
+public function ping()
+    {
+        $status = $this->natsService->ping();
+        return response()->json(['status' => $status ? 'connected' : 'not connected']);
+    }
+```
+
+
+The `sendMessage` method in the `NatsController` is responsible for publishing a message to the NATS server. It uses the NatsService to send a message to a specific NATS subject.
+
+```php
+public function sendMessage()
+    {
+        $this->natsService->publish('test.subject', 'Hello from Laravel!');
+        return response()->json(['status' => 'message sent']);
+    }
+```
+
+
+The `receiveMessage` method is responsible for subscribing to a NATS subject and processing any incoming messages on that subject. When a message is received, it will trigger the execution of a job (e.g., `ProcessMessageJob`) to handle the message’s payload.
+```php
+ public function receiveMessage()
+    {
+        $this->natsService->subscribe('test.subject', function ($message) {
+            ProcessMessageJob::dispatch($message->payload);
+        });
+
+        $this->natsService->process();
+    }
+```
+
+
